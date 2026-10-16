@@ -1,0 +1,24 @@
+{
+  "family": "portfolio-site",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "runtimePlatform": { "cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX" },
+  "executionRoleArn": "arn:aws:iam::175488706837:role/ecsTaskExecutionRole",
+  "containerDefinitions": [{
+    "name": "web",
+    "image": "175488706837.dkr.ecr.us-east-2.amazonaws.com/portfolio-site:latest",
+    "essential": true,
+    "portMappings": [{ "containerPort": 8080, "protocol": "tcp" }],
+    "linuxParameters": { "capabilities": { "drop": ["ALL"] } },
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/ecs/portfolio-site",
+        "awslogs-region": "us-east-2",
+        "awslogs-stream-prefix": "web"
+      }
+    }
+  }]
+}
