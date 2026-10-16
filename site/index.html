@@ -38,13 +38,15 @@
     <section>
       <h2>Projects</h2>
       <article class="card">
-        <h3>This website</h3>
+        <h3>Hardened container deployment on AWS</h3>
         <p>
-          Static site served by an unprivileged NGINX container on AWS, with a custom domain,
-          HTTPS, security headers and source in GitHub. Write-up covers the architecture,
-          request path, permissions, logging, cost and teardown.
+          This site runs as a non-root, capability-dropped NGINX container on ECS Fargate behind an
+          Application Load Balancer, with TLS 1.2+ from ACM, DNS in Route 53 and logs in CloudWatch.
+          No access keys exist anywhere: deploys use short-lived credentials. Every change is built,
+          scanned with Trivy and checked for security headers in CI before it ships.
         </p>
-        <a href="https://github.com/stann28/portfolio-site">Source &rarr;</a>
+        <p class="muted">ECS Fargate &middot; ALB &middot; ACM &middot; Route 53 &middot; ECR &middot; Docker &middot; GitHub Actions &middot; Trivy</p>
+        <a href="https://github.com/stann28/portfolio-site#readme">Architecture, decisions and lessons learned &rarr;</a>
       </article>
       <article class="card placeholder">
         <h3>Next project &mdash; coming soon</h3>
