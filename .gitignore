@@ -1,0 +1,11 @@
+# Secrets and local config — never commit
+.env
+*.pem
+*.key
+.aws/
+credentials
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
