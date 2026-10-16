@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-scan-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Build image
+        run: docker build --provenance=false --sbom=false -t portfolio-site:ci .
+
+      - name: Scan image with Trivy (fail on CRITICAL)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          version: v0.69.3
+          image-ref: portfolio-site:ci
+          severity: CRITICAL
+          exit-code: '1'
+          format: table
+
+      - name: Start container
+        run: |
+          docker run -d --name site -p 8080:8080 portfolio-site:ci
+          for i in $(seq 1 15); do curl -fs http://localhost:8080/healthz && break; sleep 1; done
+
+      - name: Check security headers
+        run: |
+          curl -sI http://localhost:8080 > headers.txt
+          cat headers.txt
+          for h in Content-Security-Policy X-Frame-Options X-Content-Type-Options Referrer-Policy Permissions-Policy Strict-Transport-Security; do
+            grep -qi "^$h:" headers.txt || { echo "MISSING: $h"; exit 1; }
+          done
+          if grep -qiE '^Server: nginx/[0-9]' headers.txt; then echo "Server version leaked"; exit 1; fi
+          echo "All security headers present"
+
+      - name: Confirm container runs as non-root
+        run: |
+          uid=$(docker exec site id -u)
+          echo "Container UID: $uid"
+          [ "$uid" != "0" ]
