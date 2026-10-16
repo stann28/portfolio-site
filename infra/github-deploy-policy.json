@@ -1,0 +1,12 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "EcrLogin", "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
+    { "Sid": "EcrPushAndScan", "Effect": "Allow",
+      "Action": ["ecr:BatchCheckLayerAvailability","ecr:InitiateLayerUpload","ecr:UploadLayerPart","ecr:CompleteLayerUpload","ecr:PutImage","ecr:BatchGetImage","ecr:DescribeImages","ecr:DescribeImageScanFindings"],
+      "Resource": "arn:aws:ecr:us-east-2:175488706837:repository/portfolio-site" },
+    { "Sid": "EcsDeploy", "Effect": "Allow",
+      "Action": ["ecs:UpdateService","ecs:DescribeServices"],
+      "Resource": "arn:aws:ecs:us-east-2:175488706837:service/portfolio/portfolio-site" }
+  ]
+}

@@ -31,6 +31,8 @@ flowchart LR
 | TLS | AWS Certificate Manager | Free, auto-renewing certificate, DNS-validated |
 | DNS | Porkbun (registrar) → Route 53 (hosted zone) | Free-plan accounts can't register domains in Route 53; delegating DNS keeps records scriptable in AWS |
 | Logs | CloudWatch Logs | Centralized access logs, 14-day retention |
+| CI | GitHub Actions | Build, Trivy scan, header and non-root checks on every push and PR |
+| Dependency updates | Dependabot | Weekly PRs for actions and the base image, each gated by CI |
 
 ## Hosting decision
 
@@ -63,6 +65,27 @@ flowchart LR
 - Image scanned by ECR on push; findings triaged in [`SECURITY.md`](SECURITY.md).
 - The ECR credential helper binary was verified against its published SHA-256 before use.
 - `.gitignore` blocks key and credential files; GitHub secret scanning and push protection enabled.
+- Every GitHub Action is **pinned to a full commit SHA**, not a version tag (see lesson 10).
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request. The workflow token is read-only (`permissions: contents: read`).
+
+| Step | Fails the build when |
+|---|---|
+| Build image | The Dockerfile or site files don't build |
+| Trivy scan (v0.69.3, action pinned by SHA) | Any CRITICAL vulnerability is found |
+| Start container | `/healthz` doesn't answer within 15 seconds |
+| Security headers | Any of the six headers is missing, or NGINX leaks its version |
+| Non-root check | The container runs as UID 0 |
+
+Dependabot opens weekly PRs for GitHub Actions and the NGINX base image. Each PR runs CI; I review the diff and the upstream release before merging.
+
+### Why deploys are still manual
+
+The intended design is keyless CD: GitHub Actions assumes an AWS role through **OIDC**, trusted only for `repo:stann28/portfolio-site:ref:refs/heads/main`, with permissions scoped to one ECR repository and one ECS service. The trust and permission policies are in [`infra/github-oidc-trust.json`](infra/github-oidc-trust.json) and [`infra/github-deploy-policy.json`](infra/github-deploy-policy.json).
+
+It is blocked: this account was created through AWS's new "projects" experience, and an AWS-managed **service control policy explicitly denies `iam:*Provider*`**, so the OIDC identity provider can't be created. The alternatives were long-lived access keys stored as GitHub secrets (rejected: the exact risk this design avoids) or irreversibly activating advanced features (deferred). CI therefore needs no AWS access at all, and deploys run from my workstation with short-lived `aws login` credentials.
 
 ## Permissions
 
@@ -116,16 +139,20 @@ curl -sI http://localhost:8080
 
 ## Deploy a change
 
-```bash
+Run in PowerShell after CI is green on `main`:
+
+```powershell
 aws login --remote --region us-east-2 --profile nbt     # once per session
-docker build --provenance=false --sbom=false -t portfolio-site . \
-  && docker tag portfolio-site:latest <ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/portfolio-site:latest \
-  && docker push <ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/portfolio-site:latest \
-  && aws ecs update-service --cluster portfolio --service portfolio-site --force-new-deployment \
-  && aws ecs wait services-stable --cluster portfolio --services portfolio-site
+$ECR = "<ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/portfolio-site"
+docker build --provenance=false --sbom=false -t portfolio-site .
+if ($LASTEXITCODE -eq 0) { docker tag portfolio-site:latest "${ECR}:latest"; docker push "${ECR}:latest" }
+if ($LASTEXITCODE -eq 0) { aws ecs update-service --cluster portfolio --service portfolio-site --force-new-deployment }
+if ($LASTEXITCODE -eq 0) { aws ecs wait services-stable --cluster portfolio --services portfolio-site; "DEPLOYED" }
 ```
 
-The service uses a **deployment circuit breaker with rollback**: if the new task fails health checks, ECS reverts to the last working version automatically.
+Each step runs only if the previous one succeeded, so a failed build can never ship a stale image. A typical change is live in about 2 minutes.
+
+The service uses a **deployment circuit breaker with rollback**: if the new task fails health checks, ECS reverts to the last working version automatically. The target group's deregistration delay is 30 seconds (default 300): requests to a static site finish in milliseconds, so a long drain only slows deploys.
 
 ## Teardown
 
@@ -163,6 +190,10 @@ If the security-group delete fails with a dependency error, wait a minute for th
 3. **OAuth `state` mismatch.** Pasted an authorization code from a stale browser tab; the CLI rejected it. That's CSRF protection working as designed.
 4. **Windows credential store limit.** The ECR auth token exceeded Windows Credential Manager's size limit (`The stub received bad data`). Fix: ECR credential helper, which fetches tokens on demand and stores nothing.
 5. **MSYS2 path conversion.** The shell rewrote `/ecs/portfolio-site` into a Windows path before AWS saw it. Fix: `MSYS2_ARG_CONV_EXCL='*'`.
-6. **OCI image index vs. scanner.** Docker Desktop pushed a multi-manifest index with a provenance attestation; ECR basic scanning can't scan the index. Fix: read results by the amd64 manifest digest; build with `--provenance=false` going forward.
+6. **OCI image index vs. scanner.** Docker Desktop pushed a multi-manifest index with a provenance attestation; ECR basic scanning can't scan the index. Fix: read results by the amd64 manifest digest; build with `--provenance=false` going forward. Confirmed on the next push: the plain image scanned and reported by tag.
 7. **CRLF in CLI output.** `aws.exe` output carried hidden `\r` characters that broke generated JSON. Fix: `tr -d '\r'`.
 8. **Copy/paste rewriting.** A chat tool rendered a domain name as a markdown link, which made debugging output misleading. Lesson: verify values by length and pattern, not by how they display.
+9. **Native Windows CLI in MSYS2.** `aws login --remote` couldn't read the pasted code in the MSYS2 terminal (empty input). Fix: run interactive Windows executables from PowerShell.
+10. **Supply-chain risk in the scanner itself.** In March 2026 attackers force-pushed malicious code to 76 of 77 `trivy-action` version tags. Fix: pin every action to a full commit SHA, use the vendor's known-safe versions, and verify releases by hand before merging Dependabot bumps.
+11. **SCP explicit deny.** Creating the GitHub OIDC provider failed with `explicit deny in a service control policy`. An SCP deny overrides any IAM allow, even full-access roles. Decision documented under "Why deploys are still manual."
+12. **Favicon 404s in the access logs.** Every browser visit requested `/favicon.ico`. Added an SVG icon and shipped it end to end (logs → fix → build → deploy → verify) as the live change demo.
